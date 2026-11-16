@@ -1,0 +1,14 @@
+{
+  "name": "FitNote",
+  "short_name": "FitNote",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f5fc",
+  "theme_color": "#f7f5fc",
+  "lang": "fr",
+  "icons": [
+    {"src": "icon-180.png", "sizes": "180x180", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}
