@@ -119,6 +119,12 @@ input[type=file]{box-shadow:none;padding:6px 0;font-size:14px}
 .sheet h3{margin:0 0 6px;font-size:18px}
 .sheet p{color:var(--ink2);margin:0 0 16px;font-size:14px}
 .sheet .row button{flex:1}
+.pklist{max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:14px 0 12px;padding:2px}
+.pkrow{display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:16px;margin-bottom:10px;background:var(--chip);box-shadow:var(--out-sm);cursor:pointer;font-weight:700;font-size:15px}
+.pkrow:active{box-shadow:var(--in-sm)}
+.pkrow.new{background:var(--rose);color:#b85c7e}
+.pkrow .c{color:var(--ink3);font-size:12px;font-weight:600;white-space:nowrap}
+.pkempty{color:var(--ink3);text-align:center;padding:22px 10px;font-size:14px;line-height:1.5}
 label.f{display:block;font-size:13px;color:var(--ink2);margin:12px 0 6px;font-weight:600}
 </style>
 </head>
@@ -145,7 +151,12 @@ label.f{display:block;font-size:13px;color:var(--ink2);margin:12px 0 6px;font-we
 
 <div class="modal" id="modal"><div class="sheet"><h3 id="mTitle"></h3><p id="mText"></p><div class="row"><button id="mCancel">Annuler</button><button id="mOk" class="primary">Confirmer</button></div></div></div>
 
-<datalist id="exNames"></datalist>
+<div class="modal" id="pick"><div class="sheet">
+  <div class="row" style="margin-bottom:14px"><h3 class="grow" style="margin:0">Exercices</h3><button class="ghost sm" id="pkManage">Gérer</button></div>
+  <input id="pkSearch" placeholder="Rechercher ou créer un exercice…" autocapitalize="words" enterkeyhint="done">
+  <div id="pkList" class="pklist"></div>
+  <button class="block" id="pkClose" style="margin-top:6px">Fermer</button>
+</div></div>
 
 <script>
 (function(){
@@ -166,7 +177,13 @@ function load(){
   try{const r=localStorage.getItem(KEY);if(r){const d=JSON.parse(r);if(d&&Array.isArray(d.workouts))return fill(d)}}catch(e){}
   return fill({});
 }
-function fill(d){d.version=1;d.workouts=d.workouts||[];d.settings=Object.assign({rest:90,timerOn:true},d.settings||{});return d}
+function fill(d){d.version=1;d.workouts=d.workouts||[];d.settings=Object.assign({rest:90,timerOn:true},d.settings||{});
+  d.library=Array.isArray(d.library)?d.library:[];
+  const seen=new Set(d.library.map(n=>n.toLowerCase()));
+  d.workouts.forEach(w=>w.exercises.forEach(e=>{const k=e.name.toLowerCase();if(!seen.has(k)){seen.add(k);d.library.push(e.name)}}));
+  return d}
+function addToLibrary(n){if(!D.library.some(x=>x.toLowerCase()===n.toLowerCase())){D.library.push(n);save()}}
+function useCounts(){const c={};D.workouts.forEach(w=>{if(!w.done)return;w.exercises.forEach(e=>{const k=e.name.toLowerCase();c[k]=(c[k]||0)+1})});return c}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast('Impossible d’enregistrer (stockage plein ?)')}}
 const openWorkout=()=>D.workouts.find(w=>!w.done);
 const sorted=()=>D.workouts.slice().sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0);
@@ -205,8 +222,52 @@ function show(v){view=v;document.querySelectorAll('nav button').forEach(b=>b.cla
 function render(){
   $('#headAction').innerHTML='';
   ({seance:renderSeance,histo:renderHisto,progress:renderProgress,reglages:renderReglages})[view]();
-  $('#exNames').innerHTML=exerciseNames().map(n=>`<option value="${esc(n)}">`).join('');
 }
+
+/* ---------- sélecteur d'exercices ---------- */
+let pkWorkout=null,pkManage=false;
+function openPicker(w){pkWorkout=w;pkManage=false;$('#pkSearch').value='';$('#pick').classList.add('on');drawPicker()}
+function closePicker(){$('#pick').classList.remove('on')}
+function drawPicker(){
+  const raw=norm($('#pkSearch').value),q=raw.toLowerCase(),counts=useCounts(),list=$('#pkList');
+  $('#pkManage').textContent=pkManage?'Terminé':'Gérer';
+  list.innerHTML='';
+  let names=D.library.slice().sort((a,b)=>(counts[b.toLowerCase()]||0)-(counts[a.toLowerCase()]||0)||a.localeCompare(b,'fr'));
+  if(q)names=names.filter(n=>n.toLowerCase().includes(q));
+  if(raw&&!D.library.some(n=>n.toLowerCase()===q)){
+    const b=el(`<div class="pkrow new"><span>Créer « ${esc(raw)} »</span></div>`);
+    b.onclick=()=>chooseExercise(raw);list.appendChild(b);
+  }
+  names.forEach(n=>{
+    const c=counts[n.toLowerCase()]||0;
+    const r=el(`<div class="pkrow"><span class="grow">${esc(n)}</span></div>`);
+    if(pkManage){
+      const d=el('<button class="sm danger">Retirer</button>');
+      d.onclick=ev=>{ev.stopPropagation();D.library=D.library.filter(x=>x!==n);save();drawPicker();toast('Retiré de la liste')};
+      r.appendChild(d);
+    }else{
+      r.appendChild(el(`<span class="c">${c?c+' séance'+(c>1?'s':''):'jamais'}</span>`));
+      r.onclick=()=>chooseExercise(n);
+    }
+    list.appendChild(r);
+  });
+  if(!names.length&&!raw)list.appendChild(el('<div class="pkempty">Aucun exercice enregistré pour l’instant. Tape un nom ci-dessus pour en créer un.</div>'));
+}
+function chooseExercise(name){
+  const n=norm(name);if(!n||!pkWorkout)return;
+  addToLibrary(n);
+  const w=pkWorkout,ex=w.exercises.find(e=>e.name.toLowerCase()===n.toLowerCase());
+  if(ex){closePicker();toast('Déjà dans la séance');return}
+  const prev=history(n,w.id).slice(-1)[0];
+  w.exercises.push({id:uid(),name:n,sets:prev?[{w:prev.sets[0].w,r:prev.sets[0].r}]:[{w:null,r:null}]});
+  save();closePicker();render();
+  setTimeout(()=>{const c=document.querySelector(`[data-ex="${w.exercises[w.exercises.length-1].id}"]`);c&&c.scrollIntoView({block:'center',behavior:'smooth'})},60);
+}
+$('#pkSearch').oninput=drawPicker;
+$('#pkSearch').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();const v=norm($('#pkSearch').value);if(v)chooseExercise(v)}};
+$('#pkManage').onclick=()=>{pkManage=!pkManage;drawPicker()};
+$('#pkClose').onclick=closePicker;
+$('#pick').onclick=e=>{if(e.target===$('#pick'))closePicker()};
 
 /* ---------- SÉANCE ---------- */
 function renderSeance(){
@@ -230,15 +291,8 @@ function renderSeance(){
 
   w.exercises.forEach(ex=>root.appendChild(exerciseCard(w,ex)));
 
-  // add exercise
-  const add=el(`<div class="card"><div class="row"><input class="grow" list="exNames" placeholder="Ajouter un exercice…" autocapitalize="words" enterkeyhint="done"><button class="primary">+</button></div></div>`);
-  const inp=add.querySelector('input'),btn=add.querySelector('button');
-  const go=()=>{const n=norm(inp.value);if(!n)return;
-    const prev=history(n,w.id).slice(-1)[0];
-    const sets=prev?[{w:prev.sets[0].w,r:prev.sets[0].r}]:[{w:null,r:null}];
-    w.exercises.push({id:uid(),name:n,sets});save();inp.value='';render();
-    setTimeout(()=>{const c=root.querySelector(`[data-ex="${w.exercises[w.exercises.length-1].id}"] input`);c&&c.focus()},50)};
-  btn.onclick=go;inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();go()}};
+  const add=el('<button class="primary block">+ Ajouter un exercice</button>');
+  add.onclick=()=>openPicker(w);
   root.appendChild(add);
 
   const finish=el('<button class="block" style="margin-top:8px">Terminer la séance</button>');
@@ -397,7 +451,9 @@ function renderReglages(){
   const impTa=bk.querySelector('#impTa');
   bk.querySelector('#impFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{impTa.value=r.result};r.readAsText(f)};
   const parse=()=>{try{const d=JSON.parse(impTa.value);if(!d||!Array.isArray(d.workouts))throw 0;return d}catch(e){toast('Sauvegarde invalide');return null}};
-  bk.querySelector('#bMerge').onclick=()=>{const d=parse();if(!d)return;const ids=new Set(D.workouts.map(w=>w.id));let c=0;d.workouts.forEach(w=>{if(!ids.has(w.id)){D.workouts.push(w);c++}});save();toast(c+' séance(s) ajoutée(s)');render()};
+  bk.querySelector('#bMerge').onclick=()=>{const d=parse();if(!d)return;const ids=new Set(D.workouts.map(w=>w.id));let c=0;d.workouts.forEach(w=>{if(!ids.has(w.id)){D.workouts.push(w);c++}});
+    (d.library||[]).forEach(n=>{if(!D.library.some(x=>x.toLowerCase()===n.toLowerCase()))D.library.push(n)});
+    D=fill(D);save();toast(c+' séance(s) ajoutée(s)');render()};
   bk.querySelector('#bReplace').onclick=()=>{const d=parse();if(!d)return;confirmBox('Remplacer toutes les données ?','Les séances actuelles seront écrasées par la sauvegarde.',()=>{D=fill(d);save();toast('Données restaurées');render()})};
   root.appendChild(bk);
 
